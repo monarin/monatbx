@@ -1,0 +1,294 @@
+  #collect mean intensity of the reference set  
+  obs_ref = observations_hdlr_ref.observations.deep_copy()
+  binner = obs_ref.setup_binner(n_bins=20)
+  binner_indices = binner.bin_indices()
+  obs_ref_mean = obs_ref.mean(use_binning=True)
+  I_ref_mean = flex.double([0]*binner.n_bins_used())
+  for i_bin in range(binner.n_bins_used()):
+    if obs_ref_mean.data[i_bin+1] is not None:
+      I_ref_mean[i_bin] = obs_ref_mean.data[i_bin+1]  
+      
+  #collect no. of matched reflections for the scaled set with the reference set
+  no_match_set = []
+  for obs_hdlr_scaled in observations_hdlr_scaled_set:
+    _obs_hdr_ref, _obs_hdr_scaled = observations_hdlr_ref.common_filter(obs_hdlr_scaled)
+    _obs_scaled = _obs_hdr_scaled.observations.deep_copy()
+    no_match = flex.double([0]*binner.n_bins_used())
+    for i_bin in range(1,binner.n_bins_used()+1):
+      i_binner = (binner_indices == i_bin)
+      miller_indices_bin = obs_ref.indices().select(i_binner)
+      matches_template = miller.match_multi_indices(
+                  miller_indices_unique=miller_indices_bin,
+                  miller_indices=_obs_scaled.indices())
+      I_bin = flex.double([_obs_scaled.data()[pair[1]] for pair in matches_template.pairs()])
+      no_match[i_bin-1] = len(I_bin)
+    no_match_set.append(no_match)     
+    
+  #collect mean intensity of the raw and scaled set
+  I_mean_set = []
+  I_full_mean_set = []
+  for obs_hdlr_scaled in observations_hdlr_scaled_set:
+    obs = obs_hdlr_scaled.observations.deep_copy()
+    obs.use_binning_of(obs_ref)
+    obs_mean = obs.mean(use_binning=True)
+    I_mean = flex.double([0]*binner.n_bins_used())
+    
+    obs_full = obs_hdlr_scaled.calc_full_observations()
+    obs_full.use_binning_of(obs_ref)
+    obs_full_mean = obs_full.mean(use_binning=True)
+    I_full_mean = flex.double([0]*binner.n_bins_used())
+    one_dsqr = flex.double()
+    for i_bin in range(binner.n_bins_used()):
+      one_dsqr.append(1/binner.bin_d_range(i_bin+1)[1]**2)
+      if obs_mean.data[i_bin+1] is not None:
+        I_mean[i_bin] = obs_mean.data[i_bin+1]    
+      if obs_full_mean.data[i_bin+1] is not None:
+        I_full_mean[i_bin] = obs_full_mean.data[i_bin+1]  
+    I_mean_set.append(I_mean)
+    I_full_mean_set.append(I_full_mean)
+    
+  #collect mean intensity of the post-refined set
+  I_pr_mean_set = []
+  for obs_hdlr_scaled in observations_hdlr_scaled_set:
+    obs_full = obs_hdlr_scaled.calc_full_observations()
+    obs_full.use_binning_of(obs_ref)
+    obs_full_mean = obs_full.mean(use_binning=True)
+    I_full_mean = flex.double([0]*binner.n_bins_used())
+    for i_bin in range(binner.n_bins_used()):
+      if obs_full_mean.data[i_bin+1] is not None:
+        I_full_mean[i_bin] = obs_full_mean.data[i_bin+1]  
+    I_pr_mean_set.append(I_full_mean)
+  
+  color_set =['#b2182b','#ef8a62','#fddbc7','#f7f7f7','#d1e5f0','#67a9cf','#2166ac']
+  plt.subplot(221)
+  for I_mean,cn_plot in zip(I_mean_set, range(len(I_mean_set))):
+    if cn_plot > len(color_set)-1:
+      cn_plot = len(color_set)-1
+    plt.plot(one_dsqr, flex.log(I_mean), linestyle='-', linewidth=2.0, c=color_set[cn_plot])
+  plt.title('Wilson plot before scaling')
+  plt.xlabel('1/(d^2)')
+  plt.ylabel('Log(<I>)')
+  plt.grid()
+  plt.subplot(222)
+  for I_full_mean,cn_plot in zip(I_full_mean_set, range(len(I_mean_set))):
+    if cn_plot > len(color_set)-1:
+      cn_plot = len(color_set)-1
+    plt.plot(one_dsqr, flex.log(I_full_mean), linestyle='-', linewidth=2.0, c=color_set[cn_plot])
+  plt.title('Wilson plot after scaling')
+  plt.xlabel('1/(d^2)')
+  plt.ylabel('Log(<I>)')
+  plt.grid()
+  plt.subplot(223)
+  for I_full_mean,cn_plot in zip(I_pr_mean_set, range(len(I_mean_set))):
+    if cn_plot > len(color_set)-1:
+      cn_plot = len(color_set)-1
+    plt.plot(one_dsqr, flex.log(I_full_mean), linestyle='-', linewidth=2.0, c=color_set[cn_plot])
+  plt.plot(one_dsqr, flex.log(I_ref_mean), linestyle='-', linewidth=2.0, c='k')
+  plt.title('Wilson plot after post-refinement')
+  plt.xlabel('1/(d^2)')
+  plt.ylabel('Log(<I>)')
+  plt.grid()
+  plt.subplot(224)
+  for no_match,cn_plot in zip(no_match_set, range(len(no_match_set))):
+    if cn_plot > len(color_set)-1:
+      cn_plot = len(color_set)-1
+    plt.plot(one_dsqr, no_match, linestyle='-', linewidth=2.0, c=color_set[cn_plot])
+  plt.title('No. of matching reflections with the reference set')
+  plt.xlabel('1/(d^2)')
+  plt.ylabel('No. of matched reflections')
+  plt.grid()
+  plt.show()
+  
+  
+  for i_cycle in range(1):    
+    #post-refine and merge full reflections
+    if len(observations_hdlr_scaled_set) > 0:
+      for observations_hdlr_scaled, i_frame in zip(observations_hdlr_scaled_set, range(len(observations_hdlr_scaled_set))):
+        observations_hdlr_postref, txt_out = postref_hdlr.postrefine_with_reference(observations_hdlr_ref, observations_hdlr_scaled)
+        observations_hdlr_scaled_set[i_frame] = observations_hdlr_postref
+        if i_frame == 0:
+          observations_hdlr_merged = observations_handler(iparams)
+          observations_hdlr_merged.copy_from(observations_hdlr_postref)
+          obs_full = observations_hdlr_merged.calc_full_observations()
+          obs_original_full = observations_hdlr_merged.calc_full_observations(observations_type='original')
+          observations_hdlr_merged.set_params(observations=obs_full, observations_original=obs_original_full)
+        else:
+          merge_hdlr = merge_handler(iparams)
+          observations_hdlr_merged = merge_hdlr.merge_observations_handler(observations_hdlr_merged, observations_hdlr_postref)
+      #update reference set
+      observations_hdlr_ref.copy_from(observations_hdlr_merged)
+      
+  #Remove outliers
+    miller_array_merge_amplitude = miller_array_merge.as_amplitude_array()
+    miller_array_merge_amplitude.setup_binner(auto_binning=True)
+    wp = statistics.wilson_plot(miller_array_merge_amplitude, asu_contents, e_statistics=True)
+    normalised = miller_array_merge_amplitude.normalised_amplitudes(asu_contents, wilson_plot=wp)
+    normalised_f_obs = normalised.array()
+    centric_flags = normalised_f_obs.centric_flags()
+    select_flags = flex.bool([True]*len(normalised_f_obs.indices()))
+    i_f_obs = 0
+    for centric_flag in centric_flags.data():
+      if centric_flag:
+        e_thres = 4.89
+      else:
+        e_thres = 3.72
+      if normalised_f_obs.data()[i_f_obs] > e_thres:
+        select_flags[i_f_obs] = False
+      i_f_obs += 1
+    miller_array_merge = miller_array_merge.select(select_flags)
+    
+    
+    
+    from __future__ import division
+from cctbx.array_family import flex
+from cctbx import miller
+import numpy as np
+import cPickle as pickle
+from cctbx.crystal import symmetry
+import math
+from scitbx.matrix import sqr
+from cctbx import statistics
+from mod_observations import observations_handler
+from mod_leastsqr import leastsqr_handler
+
+class postrefine_handler(object):
+  """
+  handle post-refinement
+  - read-in and store input in input_handler object
+  - generate a mean-intensity-scaled mtz file as a reference set
+  - perform post-refinement
+  """
+  def __init__(self, iparams):
+    """
+    Constructor
+    """
+    self.iparams = iparams
+    self.scale_0_d_max = 5.0
+    
+  def scale_0(self, filename):
+    """
+    Perform 0th-order scaling.
+    """
+    observations_hdlr = observations_handler(self.iparams)
+    observations_hdlr.init_params_from_file(filename)
+    
+    #get the miller_array_template
+    uc = self.iparams.target_unit_cell.parameters()
+    crystal_symmetry = crystal.symmetry(
+        unit_cell=(uc[0], uc[1], uc[2], uc[3], uc[4], uc[5]),
+        space_group_symbol=self.iparams.target_space_group
+      )
+    miller_array_complete = crystal_symmetry.build_miller_set(anomalous_flag=self.iparams.target_anomalous_flag,
+                      d_min=self.iparams.d_min, d_max=self.scale_0_d_max).array()
+                      
+    #caculate G and B scale factors
+    observations_full = observations_hdlr.calc_full_observations()
+    if True:
+      observations_full_as_f = observations_full.as_amplitude_array()
+      #apply resolution filter
+      observations_full_as_f = observations_full_as_f.resolution_filter(d_min=self.iparams.d_min, d_max=self.scale_0_d_max)
+      observations_full_as_f.use_binning_of(miller_array_complete)
+      mean_fobs_sq = observations_full_as_f.mean_sq(use_binning=True,
+        use_multiplicities=True).data[1:-1]
+      
+      #get wilson plot for miller_array_complete
+      wp = statistics.wilson_plot(miller_array_complete, asu_contents, e_statistics=True)
+      expected_f_sq = wp.expected_f_sq
+      
+      x = wp.mean_stol_sq
+      y = flex.log(mean_fobs_sq / expected_f_sq)
+      fit = flex.linear_regression(x, y)
+      assert fit.is_well_defined()
+      fit_y_intercept = fit.y_intercept()
+      fit_slope = fit.slope()
+      wilson_intensity_scale_factor = math.exp(self.fit_y_intercept) # intensity scale factor
+    self.wilson_k = math.sqrt(self.wilson_intensity_scale_factor) # conversion to amplitude scale factor
+    self.wilson_b = -self.fit_slope / 2
+    self.fit_correlation = flex.linear_correlation(self.x,self.y).coefficient()
+    
+      G, B = (wp.wilson_intensity_scale_factor*100,wp.wilson_b)
+    #except Exception:
+    #  txt_out = ' {0:40} ==> rejected (bad 0th scale)'.format(observations_hdlr.pickle_filename_only)
+    #  print txt_out
+    #  return None, txt_out
+    
+    uc_params = observations_hdlr.uc_params
+    txt_out = ' {0:40} ==> SCALED0 RES:{1:5.2f} NREFL:{2:6d} G:{3:7.2f} B:{4:7.2f} CELL:{5:5.1f} {6:5.1f} {7:5.1f} {8:5.1f} {9:5.1f} {10:5.1f}'.format(observations_hdlr.pickle_filename_only, observations_hdlr.observations.d_min(), len(observations_hdlr.observations.data()), G, B, uc_params[0],uc_params[1],uc_params[2],uc_params[3],uc_params[4],uc_params[5])
+    
+    #refresh observations_handler
+    postref_params = observations_hdlr.postref_params[:]
+    postref_params[:2] = [G,B]
+    observations_hdlr.set_params(postref_params=postref_params)
+    return observations_hdlr, txt_out
+  
+  def scale_with_reference(self, observations_hdlr_ref, filename=None, observations_hdlr=None, use_binning=True):
+    """
+    Scale each emage to the reference.
+    """
+    try:
+      if filename is not None:
+        observations_hdlr = observations_handler(self.iparams)
+        observations_hdlr.init_params_from_file(filename)
+      lsqr_hdlr = leastsqr_handler(self.iparams)
+      lsqr_hdlr.optimize_scalefactors(observations_hdlr_ref, observations_hdlr,  use_binning=use_binning)
+      
+      txt_out = ' {0:40} ==> SCALED  RES:{1:5.2f} NREFL:{2:6d} G:{3:7.2f} B:{4:7.2f} CELL:{5:5.1f} {6:5.1f} {7:5.1f} {8:5.1f} {9:5.1f} {10:5.1f} Rini:{11:5.2f} Rfin:{12:5.2f} CCini:{13:5.2f} CCfin:{14:5.2f}'.format(observations_hdlr.pickle_filename_only, observations_hdlr.observations.d_min(), len(observations_hdlr.observations.data()), np.mean(observations_hdlr.G), observations_hdlr.B, observations_hdlr.uc_params[0],observations_hdlr.uc_params[1],observations_hdlr.uc_params[2],observations_hdlr.uc_params[3],observations_hdlr.uc_params[4],observations_hdlr.uc_params[5],observations_hdlr.r_init, observations_hdlr.r_final, observations_hdlr.cc_init, observations_hdlr.cc_final)
+    except Exception:
+      return None, ' {0:40} ==> SCALING FAILED'.format(observations_hdlr.pickle_filename_only)
+    
+    return observations_hdlr, txt_out
+    
+  def postrefine_with_reference(self, observations_hdlr_ref, observations_hdlr):
+    """
+    Post-refine each image using a reference set.
+    """
+    msg = 'POSTREF'
+    try:
+      lsqr_hdlr = leastsqr_handler(self.iparams)
+      lsqr_hdlr.optimize(observations_hdlr_ref, observations_hdlr)
+    except Exception:
+      msg = 'FAILED'
+      
+    txt_out = ' {0:40} ==> {1:7} RES:{2:5.2f} NREFL:{3:6d} r0{4:7.4f} re{5:7.4f} CELL:{6:5.1f} {7:5.1f} {8:5.1f} {9:5.1f} {10:5.1f} {11:5.1f} Rini:{12:5.2f} Rfin:{13:5.2f} CCini:{14:5.2f} CCfin:{15:5.2f}'.format(observations_hdlr.pickle_filename_only, msg, observations_hdlr.observations.d_min(), len(observations_hdlr.observations.data()), observations_hdlr.r0, observations_hdlr.re, observations_hdlr.uc_params[0],observations_hdlr.uc_params[1],observations_hdlr.uc_params[2],observations_hdlr.uc_params[3],observations_hdlr.uc_params[4],observations_hdlr.uc_params[5],observations_hdlr.r_init, observations_hdlr.r_final, observations_hdlr.cc_init, observations_hdlr.cc_final)
+    
+    return observations_hdlr, txt_out
+    
+    
+    
+    
+    if self.init_type == 'from_file':
+        partiality_hdlr = partiality_handler(self.iparams)
+        self.partiality, dum0, self.rh_set, self.rs_set  = partiality_hdlr.calc_partiality_anisotropy_set(self)
+        I_full = flex.double()
+        sigI_full = flex.double()
+        flex_db = flex.double()
+        
+        fmx = sqr(self.unit_cell.fractionalization_matrix())
+        b_cart = sqr((1,0,0, 0,1,0, 0,0,1))
+        u_cart = b_cart / (8 * math.pi**2)
+        u_star = fmx * u_cart * fmx.transpose()
+
+        for miller_index, I_o, sigI_o, p in zip(self.observations.indices(), self.observations.data(), \
+              self.observations.sigmas(), self.partiality):
+          h = col(miller_index)
+          db = -2 * math.pi**2 * h.transpose() * u_star * h
+          dw_p = math.exp(db[0])
+          I_full.append(I_o/(self.G * dw_p * p))
+          sigI_full.append(sigI_o/(self.G * dw_p * p))
+          flex_db.append(dw_p)
+        
+        
+        from cctbx import adptbx
+        debye_waller_factors = adptbx.debye_waller_factor_u_star(self.observations.indices(), u_star.as_sym_mat3())
+        for x, y in zip(flex_db, debye_waller_factors):
+          print x,y, x-y
+        exit()
+        
+        #I_full = I_o/(self.G * debye_waller_factors * partiality)
+        #sigI_full = sigI_o/(self.G * debye_waller_factors * partiality)
+    
+    
+    
+
+
+
